@@ -43,6 +43,11 @@ label.inline input{width:auto}
 .retired-note{background:#f1f0eb;color:var(--sub);border-radius:8px;padding:10px 14px;font-size:14px;margin-bottom:12px}
 .modal .warn-box{background:var(--danger-bg);color:var(--danger);border-radius:8px;padding:10px 12px;font-size:14px;margin:0}
 button.danger-fill{background:var(--danger);border-color:var(--danger);color:#fff}
+.adm-list{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:8px}
+.adm-list li{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);font-size:14px}
+.adm-list li:last-child{border-bottom:none}
+.adm-list .em{flex:1;min-width:0;overflow-wrap:anywhere}
+.selbar select{width:auto;padding:3px 8px;font-size:13px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
 .tabs:not(.hidden) + main .card{border-top:none;border-radius:0 0 12px 12px}
 .sheet-head{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-end;margin-bottom:14px}
@@ -150,6 +155,7 @@ table.list{width:100%;border-collapse:collapse;font-size:14px;min-width:760px}
       <label class="inline">정산 월 <input type="month" id="month"></label>
       <span class="who" id="who"></span>
       <span id="adminBadge" class="badge admin hidden">관리자</span>
+      <button id="adminMgrBtn" class="hidden">관리자 설정</button>
       <button id="logoutBtn">로그아웃</button>
     </div>
   </header>
@@ -188,6 +194,24 @@ table.list{width:100%;border-collapse:collapse;font-size:14px;min-width:760px}
   </form>
 </div>
 
+<!-- 관리자 설정 창 (관리자) -->
+<div id="admBox" class="modal hidden">
+  <div class="box" style="max-width:440px">
+    <h2>관리자 설정</h2>
+    <p class="hint">관리자는 모든 직원의 시트를 보고, 직원 추가·수정, 경비 수정·삭제, 정산 처리를 할 수 있어요.</p>
+    <ul id="admList" class="adm-list"></ul>
+    <form id="admForm" novalidate style="display:flex;flex-direction:column;gap:6px">
+      <label>관리자로 추가할 이메일<input type="email" id="admEmail" placeholder="name@company.com"></label>
+      <p class="hint">직원으로 등록된 이메일이면 그 직원 계정이 그대로 관리자가 돼요. 직원이 아닌 사람이면 이 이메일로 '처음 등록하기'를 하면 관리자로 들어와요.</p>
+      <p class="err-msg" id="admErr"></p>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" id="admClose">닫기</button>
+        <button type="submit" class="primary">관리자로 추가</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div id="printArea"></div>
 
 <script>
@@ -211,7 +235,10 @@ const ALL = 'all';
 let me = null, isAdmin = false, employees = [], joined = {}, currentId = null;
 let showRetired = getStore('expense.showRetired') === '1', delTarget = null;
 let kind = getStore('expense.kind') === 'fuel' ? 'fuel' : 'general';
-let genRows = [], fuelPending = [], fuelDone = [];
+let genRows = [], fuelPending = [], fuelDone = [], admins = [];
+let genFilter = ['open', 'done'].includes(getStore('expense.genFilter')) ? getStore('expense.genFilter') : 'all';
+const genView = () => genFilter === 'open' ? genRows.filter(r => !r.settled_on)
+                    : genFilter === 'done' ? genRows.filter(r => r.settled_on) : genRows;
 let selected = new Set(), editingId = null, signupMode = false, empEditId = null;
 
 function $(s) { return document.querySelector(s); }
@@ -244,7 +271,8 @@ const empName = id => employees.find(e => e.id === id)?.name ?? '';
 const empLabel = id => { const e = employees.find(x => x.id === id); return e ? e.name + (e.retired_on ? ' (퇴사)' : '') : ''; };
 const activeEmps = () => employees.filter(e => !e.retired_on);
 const retiredEmps = () => employees.filter(e => e.retired_on);
-const visibleRows = () => kind === 'general' ? genRows : [...fuelPending, ...fuelDone];
+const visibleRows = () => kind === 'general' ? genView() : [...fuelPending, ...fuelDone];
+const isAdminEmail = e => !!e && admins.includes(String(e).toLowerCase());
 
 /* ---------- 로그인 ---------- */
 function setSignupMode(on) {
@@ -309,6 +337,7 @@ async function onSession(session) {
   if (error) fail(error, '권한 확인');
   isAdmin = data === true;
   $('#adminBadge').classList.toggle('hidden', !isAdmin);
+  $('#adminMgrBtn').classList.toggle('hidden', !isAdmin);
   $('#tabs').classList.toggle('hidden', !isAdmin);
   currentId = null;
   await loadEmployees();
@@ -323,6 +352,7 @@ async function loadEmployees() {
   if (isAdmin) {
     const r = await sb.rpc('employee_joined');
     if (!r.error) r.data.forEach(j => joined[j.employee_id] = j.joined);
+    await loadAdmins();
     const saved = getStore('expense.tab');
     const savedId = saved === ALL ? ALL : Number(saved);
     if (currentId !== ALL && !employees.some(e => e.id === currentId)) {
@@ -386,13 +416,14 @@ function opts(list, sel) {
 /* 표 하나 그리기. mode: general | pending(영수증 대기) | done(정산 완료) */
 function tableHTML(list, mode, emptyMsg) {
   const isAll = currentId === ALL, fuel = mode !== 'general';
-  const colCount = (fuel ? 6 : 7) + (isAll ? 1 : 0) + (isAdmin ? 1 : 0);
+  const colCount = (fuel ? 6 : 8) + (isAll ? 1 : 0) + (isAdmin ? 1 : 0);
+  const genStatus = r => r.settled_on ? `<span class="badge ok">${md(r.settled_on)} 정산</span>` : '<span class="badge no">미정산</span>';
   const allChecked = list.length > 0 && list.every(r => selected.has(r.id));
   const head = fuel
     ? `<th style="width:72px">주유일</th><th>주유소</th><th class="num" style="width:100px">금액</th>
        <th style="width:100px">${mode === 'pending' ? '상태' : '정산일'}</th><th>비고 (차량·운행 목적)</th>`
     : `<th style="width:72px">날짜</th><th style="width:84px">구분</th><th>사용처</th>
-       <th class="num" style="width:100px">금액</th><th style="width:84px">증빙</th><th>비고</th>`;
+       <th class="num" style="width:100px">금액</th><th style="width:84px">증빙</th><th>비고</th><th style="width:96px">정산</th>`;
   const rowHTML = r => {
     const who = isAll ? `<td>${esc(empLabel(r.employee_id))}</td>` : '';
     if (r.id === editingId) {
@@ -404,6 +435,7 @@ function tableHTML(list, mode, emptyMsg) {
         ${fuel ? `<td>${mode === 'pending' ? '<span class="badge wait">영수증 대기</span>' : md(r.settled_on)}</td>`
                : `<td><select id="e-proof">${opts(PROOFS, r.proof)}</select></td>`}
         <td><input id="e-note" value="${esc(r.note)}"></td>
+        ${fuel ? '' : `<td>${genStatus(r)}</td>`}
         <td style="white-space:nowrap"><button class="sm primary" data-act="save">저장</button> <button class="sm" data-act="cancel">취소</button></td></tr>`;
     }
     const mid = fuel
@@ -411,7 +443,7 @@ function tableHTML(list, mode, emptyMsg) {
          <td>${mode === 'pending' ? '<span class="badge wait">영수증 대기</span>' : `<span class="badge ok">${md(r.settled_on)} 정산</span>`}</td>
          <td>${esc(r.note)}</td>`
       : `<td>${md(r.spent_on)}</td><td>${esc(r.category)}</td><td>${esc(r.place)}</td><td class="num">${num(r.amount)}</td>
-         <td>${esc(r.proof)}</td><td>${esc(r.note)}</td>`;
+         <td>${esc(r.proof)}</td><td>${esc(r.note)}</td><td>${genStatus(r)}</td>`;
     return `<tr data-id="${r.id}" class="${selected.has(r.id) ? 'sel' : ''}">
       <td class="ck"><input type="checkbox" class="rowck" ${selected.has(r.id) ? 'checked' : ''} aria-label="선택"></td>${who}${mid}
       ${isAdmin ? `<td style="white-space:nowrap"><button class="sm" data-act="edit">수정</button> <button class="sm danger" data-act="del">삭제</button></td>` : ''}</tr>`;
@@ -446,6 +478,7 @@ function renderSheet() {
        <button class="sm" id="restoreBtn">재직으로 되돌리기</button>
        <button class="sm danger" id="deleteEmpBtn">완전 삭제</button>`
     : `<span class="badge ${joined[emp.id] ? 'ok' : 'no'}">${joined[emp.id] ? '가입 완료' : '미가입'}</span>
+       ${isAdminEmail(emp.email) ? '<span class="badge admin">관리자</span>' : ''}
        <button class="sm" id="editEmpBtn">직원 정보 수정</button>
        <button class="sm" id="retireBtn">퇴사 처리</button>
        <button class="sm danger" id="deleteEmpBtn">삭제</button>`;
@@ -470,9 +503,15 @@ function renderSheet() {
   const selbar = `<div class="selbar">
       <span id="selCount">${selected.size}건 선택</span>
       <button class="sm" id="excelBtn"><span aria-hidden="true">⬇</span> 선택 항목 엑셀 저장</button>
-      ${fuel && isAdmin ? `<span class="settle">
+      ${fuel ? '' : `<label class="inline" style="font-size:13px">보기
+        <select id="genFilter">
+          <option value="all" ${genFilter === 'all' ? 'selected' : ''}>전체</option>
+          <option value="open" ${genFilter === 'open' ? 'selected' : ''}>미정산만</option>
+          <option value="done" ${genFilter === 'done' ? 'selected' : ''}>정산 완료만</option>
+        </select></label>`}
+      ${isAdmin ? `<span class="settle">
         정산일 <input type="date" id="settleDate" value="${t}">
-        <button class="sm primary" id="settleBtn">선택 항목 정산 처리</button>
+        <button class="sm primary" id="settleBtn">${fuel ? '선택 항목 정산 처리' : '선택 항목 정산 완료'}</button>
         <button class="sm" id="unsettleBtn">정산 취소</button></span>` : ''}
     </div>`;
 
@@ -493,8 +532,12 @@ function renderSheet() {
     </form>
     <p class="err-msg" id="addErr"></p>`}
     ${selbar}
-    ${tableHTML(genRows, 'general', `${ymLabel(m)} 입력된 내역이 없어요.`)}
+    ${tableHTML(genView(), 'general', genRows.length
+        ? (genFilter === 'open' ? `${ymLabel(m)}에 미정산 내역이 없어요. 모두 정산됐어요.` : `${ymLabel(m)}에 정산 완료된 내역이 없어요.`)
+        : `${ymLabel(m)} 입력된 내역이 없어요.`)}
     <div class="summary">
+      ${genRows.length ? `<span class="chip" style="background:var(--ok-bg);color:var(--ok)">정산 완료 ${won(sum(genRows.filter(r => r.settled_on)))}</span>
+        <span class="chip">미정산 ${won(sum(genRows.filter(r => !r.settled_on)))} (${genRows.filter(r => !r.settled_on).length}건)</span>` : ''}
       ${Object.entries(byCat).map(([k, v]) => `<span class="chip">${esc(k)} ${won(v)}</span>`).join('')}
       ${fuelPending.length ? `<button class="chip wait" data-kind="fuel">주유비 영수증 대기 ${fuelPending.length}건 · ${won(sum(fuelPending))} (이 합계에 미포함)</button>` : ''}
       <span class="total">${isAll ? '전체 합계' : '청구 합계'} ${won(sum(genRows))}</span>
@@ -548,7 +591,7 @@ function refreshSelection() {
   });
   $('#selCount').textContent = `${selected.size}건 선택`;
 }
-function groupRows(g) { return g === 'general' ? genRows : g === 'pending' ? fuelPending : fuelDone; }
+function groupRows(g) { return g === 'general' ? genView() : g === 'pending' ? fuelPending : fuelDone; }
 
 /* ---------- 엑셀 저장 ---------- */
 function exportExcel() {
@@ -560,11 +603,11 @@ function exportExcel() {
   const total = sum(list);
   const header = fuel
     ? ['직원', '주유일', '주유소', '금액(원)', '상태', '정산일', '비고']
-    : ['직원', '날짜', '구분', '사용처', '금액(원)', '증빙', '비고'];
+    : ['직원', '날짜', '구분', '사용처', '금액(원)', '증빙', '비고', '정산', '정산일'];
   const amtCol = fuel ? 3 : 4;
   const line = r => fuel
     ? [empLabel(r.employee_id), r.spent_on, r.place, r.amount, r.settled_on ? '정산 완료' : '영수증 대기', r.settled_on || '', r.note || '']
-    : [empLabel(r.employee_id), r.spent_on, r.category, r.place, r.amount, r.proof || '', r.note || ''];
+    : [empLabel(r.employee_id), r.spent_on, r.category, r.place, r.amount, r.proof || '', r.note || '', r.settled_on ? '정산 완료' : '미정산', r.settled_on || ''];
   const totalRow = header.map((_, i) => i === 0 ? '합계' : i === amtCol ? total : '');
   const aoa = [
     [fuel ? '주유비 내역' : '개인경비 정산 내역'],
@@ -583,8 +626,8 @@ function exportExcel() {
   }
   ws['!cols'] = fuel
     ? [{ wch: 10 }, { wch: 12 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 28 }]
-    : [{ wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 28 }, { wch: 12 }, { wch: 10 }, { wch: 28 }];
-  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }];
+    : [{ wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 28 }, { wch: 12 }, { wch: 10 }, { wch: 28 }, { wch: 10 }, { wch: 12 }];
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, fuel ? '주유비' : '정산내역');
   const safe = who.replace(/[\\/:*?"<>|]/g, '').trim() || '직원';
@@ -592,24 +635,75 @@ function exportExcel() {
   toast(`${list.length}건을 엑셀로 저장했어요`);
 }
 
-/* ---------- 주유비 정산 처리 (관리자) ---------- */
+/* ---------- 정산 처리 (관리자) : 일반 경비와 주유비 공통 ---------- */
 async function settle(on) {
-  const pool = on ? fuelPending : fuelDone;
+  const fuel = kind === 'fuel';
+  const pool = fuel ? (on ? fuelPending : fuelDone) : genView().filter(r => on ? !r.settled_on : !!r.settled_on);
   const ids = pool.filter(r => selected.has(r.id)).map(r => r.id);
+  const waitWord = fuel ? '영수증 대기' : '미정산';
   if (!ids.length) {
-    toast(on ? '정산할 "영수증 대기" 항목을 먼저 체크해 주세요' : '정산을 취소할 "정산 완료" 항목을 먼저 체크해 주세요');
+    toast(on ? `정산할 "${waitWord}" 항목을 먼저 체크해 주세요` : '정산을 취소할 "정산 완료" 항목을 먼저 체크해 주세요');
     return;
   }
   const date = $('#settleDate').value;
   if (on && !date) { toast('정산일을 넣어 주세요'); return; }
-  if (!on && !confirm(`${ids.length}건을 다시 "영수증 대기"로 돌릴까요?`)) return;
+  if (!on && !confirm(`${ids.length}건을 다시 "${waitWord}"(으)로 돌릴까요?`)) return;
   const { error } = await sb.from('expenses').update({ settled_on: on ? date : null }).in('id', ids);
   if (error) return fail(error, on ? '정산 처리' : '정산 취소');
-  toast(on ? (date.startsWith(ym()) ? `${ids.length}건을 정산 처리했어요`
-                                   : `${ids.length}건을 정산 처리했어요 (${ymLabel(date.slice(0, 7))} 정산으로 들어갔어요)`)
-           : `${ids.length}건을 영수증 대기로 돌렸어요`);
+  toast(!on ? `${ids.length}건을 ${waitWord}(으)로 돌렸어요`
+       : !fuel ? `${ids.length}건을 정산 완료로 표시했어요`
+       : date.startsWith(ym()) ? `${ids.length}건을 정산 처리했어요`
+       : `${ids.length}건을 정산 처리했어요 (${ymLabel(date.slice(0, 7))} 정산으로 들어갔어요)`);
   loadRows();
 }
+
+/* ---------- 관리자 설정 (관리자) ---------- */
+async function loadAdmins() {
+  const { data, error } = await sb.from('admins').select('email').order('email');
+  admins = error ? [] : data.map(a => a.email.toLowerCase());
+}
+function renderAdmins() {
+  $('#admList').innerHTML = admins.map(e => {
+    const emp = employees.find(x => (x.email || '').toLowerCase() === e);
+    const who = emp ? esc(emp.name) + (emp.retired_on ? ' (퇴사)' : '') : '직원 아님';
+    return `<li><span class="em">${esc(e)} <span class="lbl">· ${who}</span></span>
+      ${e === me ? '<span class="badge no">나</span>' : `<button class="sm danger" type="button" data-rm="${esc(e)}">해제</button>`}</li>`;
+  }).join('') || '<li>관리자 목록을 불러오지 못했어요. 업데이트 SQL을 실행했는지 확인하세요.</li>';
+}
+async function openAdmins() {
+  await loadAdmins(); renderAdmins();
+  $('#admEmail').value = ''; $('#admErr').textContent = '';
+  $('#admBox').classList.remove('hidden'); $('#admEmail').focus();
+}
+$('#adminMgrBtn').addEventListener('click', openAdmins);
+$('#admClose').addEventListener('click', () => { $('#admBox').classList.add('hidden'); renderSheet(); });
+$('#admForm').addEventListener('input', () => $('#admErr').textContent = '');
+$('#admForm').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const email = $('#admEmail').value.trim().toLowerCase();
+  if (!isEmail(email)) { $('#admErr').textContent = '이메일을 정확히 넣어 주세요'; return; }
+  if (admins.includes(email)) { $('#admErr').textContent = '이미 관리자예요'; return; }
+  const { error } = await sb.from('admins').insert({ email });
+  if (error) {
+    $('#admErr').textContent = error.code === '23505' ? '이미 관리자예요' : '추가하지 못했어요: ' + error.message;
+    return;
+  }
+  const emp = employees.find(x => (x.email || '').toLowerCase() === email);
+  toast(emp ? `${emp.name} 님을 관리자로 추가했어요. 다음 로그인부터 전체가 보여요.`
+            : `${email} 을(를) 관리자로 추가했어요. 이 이메일로 '처음 등록하기'를 하면 돼요.`);
+  $('#admEmail').value = '';
+  await loadAdmins(); renderAdmins();
+});
+$('#admList').addEventListener('click', async ev => {
+  const b = ev.target.closest('button[data-rm]'); if (!b) return;
+  const email = b.dataset.rm;
+  if (!confirm(`${email} 의 관리자 권한을 해제할까요?\n직원으로 등록돼 있다면 일반 직원 화면으로 돌아가요.`)) return;
+  const { data, error } = await sb.from('admins').delete().eq('email', email).select();
+  if (error) { $('#admErr').textContent = error.message.replace(/^.*?:\s*(?=본인|관리자)/, ''); return; }
+  if (!data || !data.length) { $('#admErr').textContent = '해제하지 못했어요. 새로고침 후 다시 해 주세요.'; return; }
+  toast(`${email} 의 관리자 권한을 해제했어요`);
+  await loadAdmins(); renderAdmins();
+});
 
 /* ---------- 출력 ---------- */
 function printPage(emp, list, m, fuelMode) {
@@ -762,6 +856,10 @@ $('#tabs').addEventListener('click', ev => {
 
 $('#sheet').addEventListener('change', ev => {
   const t = ev.target;
+  if (t.id === 'genFilter') {
+    genFilter = t.value; setStore('expense.genFilter', genFilter);
+    selected.clear(); editingId = null; return renderSheet();
+  }
   if (t.classList.contains('ckall')) {
     groupRows(t.dataset.group).forEach(r => t.checked ? selected.add(r.id) : selected.delete(r.id));
     return refreshSelection();
