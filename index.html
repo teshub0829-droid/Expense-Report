@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>월별 개인경비 정산</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<style>
+:root{--bg:#f6f6f3;--card:#fff;--line:#e2e1dc;--text:#1f1f1d;--sub:#6b6a65;--accent:#2563eb;--accent-bg:#e8f0fe;--danger:#c0392b;--danger-bg:#fdecea;--warn-bg:#fff4dc;--warn:#8a5a00;--ok:#1e7a46;--ok-bg:#e6f4ea}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;font-size:15px;line-height:1.5}
+.screen{max-width:1040px;margin:0 auto;padding:16px}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:12px}
+header h1{font-size:22px;margin:0;font-weight:600}
+.hd-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.who{font-size:13px;color:var(--sub)}
+button,input,select{font:inherit;color:inherit}
+button{border:1px solid var(--line);background:var(--card);padding:7px 14px;border-radius:8px;cursor:pointer}
+button:hover{border-color:#bdbbb3}
+button:disabled{opacity:.6;cursor:default}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.danger{color:var(--danger)}
+button.sm{padding:3px 9px;font-size:13px}
+button.link{border:none;background:none;color:var(--accent);padding:0;text-decoration:underline}
+input,select{border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:#fff;min-width:0;width:100%}
+input[type=checkbox]{width:16px;height:16px;padding:0;accent-color:var(--accent);cursor:pointer}
+label.inline{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--sub)}
+label.inline input{width:auto}
+.notice{padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:14px}
+.notice.warn{background:var(--warn-bg);color:var(--warn)}
+.notice.err{background:var(--danger-bg);color:var(--danger)}
+.notice.ok{background:var(--ok-bg);color:var(--ok)}
+.hidden{display:none!important}
+.tabs{display:flex;gap:4px;overflow-x:auto;border-bottom:1px solid var(--line)}
+.tab{border:1px solid var(--line);border-bottom:none;border-radius:8px 8px 0 0;background:#ecebe6;white-space:nowrap}
+.tab.on{background:var(--card);font-weight:600;position:relative;top:1px}
+.tab.add{background:transparent;border-style:dashed;color:var(--accent)}
+.tab .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#c9c7bf;margin-left:6px;vertical-align:1px}
+.tab .dot.on{background:var(--ok)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.tabs:not(.hidden) + main .card{border-top:none;border-radius:0 0 12px 12px}
+.sheet-head{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-end;margin-bottom:14px}
+.lbl{font-size:12px;color:var(--sub)}
+.big{font-size:18px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.badge{font-size:12px;font-weight:500;padding:2px 8px;border-radius:6px;white-space:nowrap}
+.badge.ok{background:var(--ok-bg);color:var(--ok)}
+.badge.no{background:#f1f0eb;color:var(--sub)}
+.badge.wait{background:var(--warn-bg);color:var(--warn)}
+.badge.admin{background:var(--accent-bg);color:var(--accent)}
+.actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.kindbar{display:inline-flex;background:#f1f0eb;border-radius:10px;padding:3px;gap:3px;margin-bottom:14px}
+.kindbar button{border:none;background:transparent;padding:6px 16px;border-radius:8px;color:var(--sub)}
+.kindbar button.on{background:#fff;color:var(--text);font-weight:600;box-shadow:0 0 0 1px var(--line)}
+.kindbar .cnt{margin-left:6px}
+.add-grid{display:grid;grid-template-columns:130px 110px 1.4fr 120px 110px 1.2fr auto;gap:8px;align-items:end;background:#fafaf8;border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:6px}
+.add-grid.fuel{grid-template-columns:130px 1.4fr 120px 1.6fr auto}
+.add-grid label{display:flex;flex-direction:column;font-size:12px;color:var(--sub);gap:3px}
+.err-msg{color:var(--danger);font-size:13px;min-height:18px;margin:0 0 8px}
+.selbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 8px;font-size:14px;color:var(--sub)}
+.selbar .settle{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-left:auto}
+.selbar .settle input{width:auto;padding:3px 8px;font-size:13px}
+.sec-title{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:18px 0 6px;font-size:15px;font-weight:600}
+.sec-title small{font-weight:400;color:var(--sub);font-size:13px}
+.tbl-wrap{overflow-x:auto}
+table.list{width:100%;border-collapse:collapse;font-size:14px;min-width:760px}
+.list th,.list td{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;vertical-align:middle}
+.list th{font-size:12px;color:var(--sub);font-weight:500;background:#fafaf8}
+.list td.num,.list th.num{text-align:right;white-space:nowrap}
+.list td.ck,.list th.ck{width:34px;text-align:center}
+.list tr.sel td{background:#f3f7ff}
+.list td input,.list td select{padding:4px 6px;font-size:13px}
+.empty{color:var(--sub);text-align:center;padding:22px 0}
+.summary{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+.chip{background:#f1f0eb;border-radius:8px;padding:5px 10px;font-size:13px}
+.chip.wait{background:var(--warn-bg);color:var(--warn);border:none;cursor:pointer}
+.total{margin-left:auto;font-size:18px;font-weight:600}
+.total.sm{font-size:15px}
+.login{max-width:380px;margin:8vh auto 0}
+.login h1{font-size:22px;margin:0 0 4px}
+.login p.sub{color:var(--sub);font-size:14px;margin:0 0 16px}
+.login form{display:flex;flex-direction:column;gap:10px}
+.login label{display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--sub)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
+.modal .box{background:#fff;border-radius:12px;padding:20px;width:100%;max-width:380px;display:flex;flex-direction:column;gap:10px}
+.modal h2{margin:0;font-size:18px}
+.modal label{display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--sub)}
+.modal .hint{font-size:12px;color:var(--sub);margin:0}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#222;color:#fff;padding:9px 16px;border-radius:8px;font-size:14px;z-index:20;max-width:90vw}
+@media (max-width:820px){.add-grid,.add-grid.fuel{grid-template-columns:1fr 1fr}.add-grid .wide{grid-column:1/-1}.selbar .settle{margin-left:0}}
+
+/* ---------- 출력용 ---------- */
+#printArea{display:none}
+@media print{
+  @page{size:A4;margin:14mm}
+  body{background:#fff;font-size:11pt}
+  .screen,.modal,.toast{display:none!important}
+  #printArea{display:block}
+}
+.pp{page-break-after:always;color:#000}
+.pp:last-child{page-break-after:auto}
+.pp-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
+.pp-top h1{font-size:20pt;margin:8px 0 0;letter-spacing:4px}
+.pp table{border-collapse:collapse;width:100%}
+.pp td,.pp th{border:1px solid #000;padding:5px 6px;font-size:10pt}
+.pp th{background:#eee;font-weight:600}
+.appr{width:auto!important}
+.appr th,.appr td{width:62px;text-align:center}
+.appr td{height:48px}
+.pinfo{margin-bottom:12px}
+.pinfo th{width:15%}
+.plist td.num{text-align:right}
+.plist td{height:24px}
+.psum{margin-top:10px}
+.psign{margin-top:24px;text-align:center;line-height:2.2}
+</style>
+</head>
+<body>
+
+<!-- 로그인 화면 -->
+<div class="screen" id="loginView">
+  <div class="login card">
+    <h1 id="loginTitle">월별 개인경비 정산</h1>
+    <p class="sub" id="loginSub">회사에 등록된 이메일로 로그인하세요.</p>
+    <div id="loginNotice" class="notice hidden"></div>
+    <form id="loginForm" novalidate>
+      <label>이메일<input type="email" id="lgEmail" placeholder="name@company.com" autocomplete="username"></label>
+      <label>비밀번호<input type="password" id="lgPw" placeholder="6자 이상" autocomplete="current-password"></label>
+      <label id="lgPw2Wrap" class="hidden">비밀번호 확인<input type="password" id="lgPw2" autocomplete="new-password"></label>
+      <p class="err-msg" id="lgErr"></p>
+      <button type="submit" class="primary" id="lgBtn">로그인</button>
+    </form>
+    <p style="font-size:13px;color:var(--sub);margin:14px 0 0">
+      <span id="lgSwitchText">처음 사용하시나요?</span>
+      <button class="link" id="lgSwitch" type="button">처음 등록하기</button>
+    </p>
+  </div>
+</div>
+
+<!-- 정산 화면 -->
+<div class="screen hidden" id="appView">
+  <header>
+    <h1>월별 개인경비 정산</h1>
+    <div class="hd-right">
+      <label class="inline">정산 월 <input type="month" id="month"></label>
+      <span class="who" id="who"></span>
+      <span id="adminBadge" class="badge admin hidden">관리자</span>
+      <button id="logoutBtn">로그아웃</button>
+    </div>
+  </header>
+  <div id="notice" class="notice hidden"></div>
+  <nav id="tabs" class="tabs hidden"></nav>
+  <main id="sheet"></main>
+</div>
+
+<!-- 직원 추가/수정 창 (관리자) -->
+<div id="empBox" class="modal hidden">
+  <form class="box" id="empForm" novalidate>
+    <h2 id="empTitle">직원 추가</h2>
+    <label>이름<input id="empName" placeholder="홍길동"></label>
+    <label>로그인 이메일<input type="email" id="empEmail" placeholder="hong@company.com"></label>
+    <p class="hint">직원은 이 이메일로 '처음 등록하기'를 해서 비밀번호를 만들어요.</p>
+    <p class="err-msg" id="empErr"></p>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button type="button" id="empCancel">닫기</button>
+      <button type="submit" class="primary">저장</button>
+    </div>
+  </form>
+</div>
+
+<div id="printArea"></div>
+
+<script>
+/* =====================================================
+   ① 여기 두 줄만 내 Supabase 값으로 바꾸면 됩니다.
+   (설치가이드 3단계 참고)
+   ===================================================== */
+const SUPABASE_URL = 'https://gnzljeupzwrheqvxmmyu.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_zYbdjmFN95VvL_gnJt6tpg_qN4rZP2S';
+
+/* ② 필요하면 아래 목록도 회사에 맞게 바꾸세요. (주유비는 따로 관리하므로 여기 넣지 마세요) */
+const CATEGORIES = ['교통비', '식대', '주차비', '소모품비', '통신비', '기타'];
+const PROOFS     = ['영수증', '카드전표', '세금계산서', '증빙 없음'];
+const APPROVERS  = ['담당', '팀장', '대표'];   // 출력물 결재란
+
+/* ---------------- 이하 수정 불필요 ---------------- */
+const configured = !SUPABASE_URL.includes('여기에') && !SUPABASE_KEY.includes('여기에');
+const sb = configured ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+const ALL = 'all';
+
+let me = null, isAdmin = false, employees = [], joined = {}, currentId = null;
+let kind = getStore('expense.kind') === 'fuel' ? 'fuel' : 'general';
+let genRows = [], fuelPending = [], fuelDone = [];
+let selected = new Set(), editingId = null, signupMode = false, empEditId = null;
+
+function $(s) { return document.querySelector(s); }
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num = n => (Math.round(Number(n)) || 0).toLocaleString('ko-KR');
+const won = n => num(n) + '원';
+const pad = n => String(n).padStart(2, '0');
+const md = d => d ? d.slice(5).replace('-', '/') : '';
+const sum = list => list.reduce((a, r) => a + r.amount, 0);
+const isEmail = s => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+function today() { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+function ymNow() { return today().slice(0, 7); }
+function ymLabel(ym) { const [y, m] = ym.split('-'); return `${y}년 ${Number(m)}월`; }
+function monthRange(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  const next = m === 12 ? `${y+1}-01` : `${y}-${pad(m+1)}`;
+  return [ym + '-01', next + '-01'];
+}
+function getStore(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function setStore(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function toast(msg) {
+  document.querySelectorAll('.toast').forEach(x => x.remove());
+  const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 2800);
+}
+function showNotice(el, msg, type) { el.className = 'notice ' + type; el.textContent = msg; }
+function fail(error, what) { console.error(error); toast(`${what} 실패: ${error.message || '알 수 없는 오류'}`); }
+const ym = () => $('#month').value || ymNow();
+const empName = id => employees.find(e => e.id === id)?.name ?? '';
+const visibleRows = () => kind === 'general' ? genRows : [...fuelPending, ...fuelDone];
+
+/* ---------- 로그인 ---------- */
+function setSignupMode(on) {
+  signupMode = on;
+  $('#lgPw2Wrap').classList.toggle('hidden', !on);
+  $('#lgBtn').textContent = on ? '등록하고 시작하기' : '로그인';
+  $('#loginSub').textContent = on ? '관리자가 등록해 준 이메일로 비밀번호를 만드세요.' : '회사에 등록된 이메일로 로그인하세요.';
+  $('#lgSwitchText').textContent = on ? '이미 등록했나요?' : '처음 사용하시나요?';
+  $('#lgSwitch').textContent = on ? '로그인하기' : '처음 등록하기';
+  $('#lgPw').autocomplete = on ? 'new-password' : 'current-password';
+  $('#lgErr').textContent = '';
+}
+$('#lgSwitch').addEventListener('click', () => setSignupMode(!signupMode));
+$('#loginForm').addEventListener('input', () => $('#lgErr').textContent = '');
+
+$('#loginForm').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const email = $('#lgEmail').value.trim().toLowerCase(), password = $('#lgPw').value;
+  const err = !isEmail(email) ? '이메일을 정확히 넣어 주세요'
+          : password.length < 6 ? '비밀번호는 6자 이상이어야 해요'
+          : (signupMode && password !== $('#lgPw2').value) ? '비밀번호 확인이 달라요' : '';
+  $('#lgErr').textContent = err;
+  if (err) return;
+  const btn = $('#lgBtn'); btn.disabled = true;
+  try {
+    if (signupMode) {
+      const { data, error } = await sb.auth.signUp({ email, password });
+      if (error) {
+        const m = error.message || '';
+        $('#lgErr').textContent = /registered|exists/i.test(m) ? '이미 등록된 이메일이에요. 로그인해 주세요.'
+          : /database error|등록되지 않은/i.test(m) ? '관리자가 등록한 이메일이 아니에요. 관리자에게 문의하세요.'
+          : '등록하지 못했어요: ' + m;
+        return;
+      }
+      if (!data.session) {
+        showNotice($('#loginNotice'), '이메일 확인이 켜져 있어 바로 시작할 수 없어요. 관리자에게 "이메일 확인 끄기"(설치가이드 2단계)를 요청하세요.', 'warn');
+        return;
+      }
+    } else {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) { $('#lgErr').textContent = '이메일 또는 비밀번호가 맞지 않아요'; return; }
+    }
+    $('#lgPw').value = ''; $('#lgPw2').value = '';
+  } finally { btn.disabled = false; }
+});
+
+$('#logoutBtn').addEventListener('click', () => sb.auth.signOut());
+
+async function onSession(session) {
+  const email = session?.user?.email?.toLowerCase() ?? null;
+  if (email === me) return;
+  me = email;
+  if (!me) {
+    isAdmin = false; employees = []; genRows = []; fuelPending = []; fuelDone = []; selected.clear(); currentId = null;
+    $('#appView').classList.add('hidden'); $('#loginView').classList.remove('hidden');
+    setSignupMode(false);
+    return;
+  }
+  $('#loginView').classList.add('hidden'); $('#appView').classList.remove('hidden');
+  $('#who').textContent = me;
+  const { data, error } = await sb.rpc('is_admin');
+  if (error) fail(error, '권한 확인');
+  isAdmin = data === true;
+  $('#adminBadge').classList.toggle('hidden', !isAdmin);
+  $('#tabs').classList.toggle('hidden', !isAdmin);
+  currentId = null;
+  await loadEmployees();
+}
+
+/* ---------- 데이터 ---------- */
+async function loadEmployees() {
+  const { data, error } = await sb.from('employees').select('*').order('sort_order').order('id');
+  if (error) return fail(error, '직원 목록 불러오기');
+  employees = data;
+  joined = {};
+  if (isAdmin) {
+    const r = await sb.rpc('employee_joined');
+    if (!r.error) r.data.forEach(j => joined[j.employee_id] = j.joined);
+    const saved = getStore('expense.tab');
+    const savedId = saved === ALL ? ALL : Number(saved);
+    if (currentId !== ALL && !employees.some(e => e.id === currentId)) {
+      currentId = savedId === ALL || employees.some(e => e.id === savedId) ? savedId : ALL;
+    }
+  } else {
+    currentId = employees.find(e => (e.email || '').toLowerCase() === me)?.id ?? null;
+  }
+  renderTabs();
+  await loadRows();
+}
+
+function empOrder(id) { const i = employees.findIndex(e => e.id === id); return i < 0 ? 1e9 : i; }
+function byEmpThen(field) {
+  return (a, b) => empOrder(a.employee_id) - empOrder(b.employee_id)
+    || (a[field] < b[field] ? -1 : a[field] > b[field] ? 1 : 0)
+    || (a.spent_on < b.spent_on ? -1 : a.spent_on > b.spent_on ? 1 : a.id - b.id);
+}
+
+async function loadRows() {
+  selected.clear(); editingId = null;
+  if (currentId == null) { genRows = fuelPending = fuelDone = []; return renderSheet(); }
+  const [from, to] = monthRange(ym());
+  const scope = q => currentId === ALL ? q : q.eq('employee_id', currentId);
+  const base = () => scope(sb.from('expenses').select('*'));
+  const [g, p, d] = await Promise.all([
+    base().eq('kind', 'general').gte('spent_on', from).lt('spent_on', to).order('spent_on').order('id'),
+    base().eq('kind', 'fuel').is('settled_on', null).order('spent_on').order('id'),
+    base().eq('kind', 'fuel').gte('settled_on', from).lt('settled_on', to).order('settled_on').order('spent_on').order('id')
+  ]);
+  const err = g.error || p.error || d.error;
+  if (err) return fail(err, '내역 불러오기');
+  genRows = g.data; fuelPending = p.data; fuelDone = d.data;
+  if (currentId === ALL) {
+    genRows = genRows.slice().sort(byEmpThen('spent_on'));
+    fuelPending = fuelPending.slice().sort(byEmpThen('spent_on'));
+    fuelDone = fuelDone.slice().sort(byEmpThen('settled_on'));
+  }
+  renderSheet();
+}
+
+/* ---------- 화면 ---------- */
+function renderTabs() {
+  if (!isAdmin) { $('#tabs').innerHTML = ''; return; }
+  const all = `<button class="tab ${currentId === ALL ? 'on' : ''}" data-id="${ALL}">전체 보기</button>`;
+  const tabs = employees.map(e =>
+    `<button class="tab ${e.id === currentId ? 'on' : ''}" data-id="${e.id}">${esc(e.name)}<span class="dot ${joined[e.id] ? 'on' : ''}" title="${joined[e.id] ? '가입 완료' : '아직 미가입'}"></span></button>`).join('');
+  $('#tabs').innerHTML = all + tabs + `<button class="tab add" id="addEmp">+ 직원 추가</button>`;
+}
+
+function opts(list, sel) {
+  const l = sel && !list.includes(sel) ? [...list, sel] : list;
+  return l.map(v => `<option ${v === sel ? 'selected' : ''}>${esc(v)}</option>`).join('');
+}
+
+/* 표 하나 그리기. mode: general | pending(영수증 대기) | done(정산 완료) */
+function tableHTML(list, mode, emptyMsg) {
+  const isAll = currentId === ALL, fuel = mode !== 'general';
+  const colCount = (fuel ? 6 : 7) + (isAll ? 1 : 0) + (isAdmin ? 1 : 0);
+  const allChecked = list.length > 0 && list.every(r => selected.has(r.id));
+  const head = fuel
+    ? `<th style="width:72px">주유일</th><th>주유소</th><th class="num" style="width:100px">금액</th>
+       <th style="width:100px">${mode === 'pending' ? '상태' : '정산일'}</th><th>비고 (차량·운행 목적)</th>`
+    : `<th style="width:72px">날짜</th><th style="width:84px">구분</th><th>사용처</th>
+       <th class="num" style="width:100px">금액</th><th style="width:84px">증빙</th><th>비고</th>`;
+  const rowHTML = r => {
+    const who = isAll ? `<td>${esc(empName(r.employee_id))}</td>` : '';
+    if (r.id === editingId) {
+      return `<tr data-id="${r.id}"><td class="ck"></td>${who}
+        <td><input type="date" id="e-date" value="${r.spent_on}"></td>
+        ${fuel ? '' : `<td><select id="e-cat">${opts(CATEGORIES, r.category)}</select></td>`}
+        <td><input id="e-place" value="${esc(r.place)}"></td>
+        <td><input type="number" id="e-amt" min="1" step="100" value="${r.amount}"></td>
+        ${fuel ? `<td>${mode === 'pending' ? '<span class="badge wait">영수증 대기</span>' : md(r.settled_on)}</td>`
+               : `<td><select id="e-proof">${opts(PROOFS, r.proof)}</select></td>`}
+        <td><input id="e-note" value="${esc(r.note)}"></td>
+        <td style="white-space:nowrap"><button class="sm primary" data-act="save">저장</button> <button class="sm" data-act="cancel">취소</button></td></tr>`;
+    }
+    const mid = fuel
+      ? `<td>${md(r.spent_on)}</td><td>${esc(r.place)}</td><td class="num">${num(r.amount)}</td>
+         <td>${mode === 'pending' ? '<span class="badge wait">영수증 대기</span>' : `<span class="badge ok">${md(r.settled_on)} 정산</span>`}</td>
+         <td>${esc(r.note)}</td>`
+      : `<td>${md(r.spent_on)}</td><td>${esc(r.category)}</td><td>${esc(r.place)}</td><td class="num">${num(r.amount)}</td>
+         <td>${esc(r.proof)}</td><td>${esc(r.note)}</td>`;
+    return `<tr data-id="${r.id}" class="${selected.has(r.id) ? 'sel' : ''}">
+      <td class="ck"><input type="checkbox" class="rowck" ${selected.has(r.id) ? 'checked' : ''} aria-label="선택"></td>${who}${mid}
+      ${isAdmin ? `<td style="white-space:nowrap"><button class="sm" data-act="edit">수정</button> <button class="sm danger" data-act="del">삭제</button></td>` : ''}</tr>`;
+  };
+  return `<div class="tbl-wrap"><table class="list" data-group="${mode}">
+    <thead><tr>
+      <th class="ck"><input type="checkbox" class="ckall" data-group="${mode}" ${allChecked ? 'checked' : ''} aria-label="전체 선택" ${list.length ? '' : 'disabled'}></th>
+      ${isAll ? '<th style="width:90px">직원</th>' : ''}${head}${isAdmin ? '<th style="width:110px">관리</th>' : ''}
+    </tr></thead>
+    <tbody>${list.length ? list.map(rowHTML).join('') : `<tr><td colspan="${colCount}" class="empty">${emptyMsg}</td></tr>`}</tbody>
+  </table></div>`;
+}
+
+function renderSheet() {
+  const m = ym();
+  const isAll = currentId === ALL;
+  const emp = isAll ? null : employees.find(e => e.id === currentId);
+  if (!isAll && !emp) {
+    $('#sheet').innerHTML = `<section class="card"><p class="empty">${isAdmin
+      ? '직원이 없어요. 위의 "+ 직원 추가"로 직원을 등록하세요.'
+      : '이 이메일(' + esc(me) + ')로 등록된 직원 시트가 없어요. 관리자에게 문의하세요.'}</p></section>`;
+    return;
+  }
+  const t = today();
+  const defDate = t.startsWith(m) ? t : m + '-01';
+  const fuel = kind === 'fuel';
+
+  const head = isAll
+    ? `<div><div class="lbl">보기</div><div class="big">전체 직원 <span class="badge no">${employees.length}명</span></div></div>`
+    : `<div><div class="lbl">신청자</div><div class="big">${esc(emp.name)}
+        ${isAdmin ? `<span class="badge ${joined[emp.id] ? 'ok' : 'no'}">${joined[emp.id] ? '가입 완료' : '미가입'}</span>
+        <button class="sm" id="editEmpBtn">직원 정보 수정</button>` : ''}</div>
+        ${isAdmin ? `<div class="lbl">${esc(emp.email || '이메일 없음 — 직원 정보 수정에서 넣어 주세요')}</div>` : ''}</div>`;
+
+  const printBtns = fuel
+    ? (isAll ? '<button id="printAll" class="primary">주유비 정산서 전체 출력</button>'
+             : `<button id="printOne">주유비 정산서 출력</button>${isAdmin ? '<button id="printAll">전체 직원 주유비 출력</button>' : ''}`)
+    : (isAll ? '<button id="printAll" class="primary">전체 직원 출력</button>'
+             : `<button id="printOne">출력</button>${isAdmin ? '<button id="printAll">전체 직원 출력</button>' : ''}`);
+
+  const kindbar = `<div class="kindbar" role="tablist">
+      <button data-kind="general" class="${fuel ? '' : 'on'}">일반 경비</button>
+      <button data-kind="fuel" class="${fuel ? 'on' : ''}">주유비${fuelPending.length ? `<span class="badge wait cnt">영수증 대기 ${fuelPending.length}</span>` : ''}</button>
+    </div>`;
+
+  const selbar = `<div class="selbar">
+      <span id="selCount">${selected.size}건 선택</span>
+      <button class="sm" id="excelBtn"><span aria-hidden="true">⬇</span> 선택 항목 엑셀 저장</button>
+      ${fuel && isAdmin ? `<span class="settle">
+        정산일 <input type="date" id="settleDate" value="${t}">
+        <button class="sm primary" id="settleBtn">선택 항목 정산 처리</button>
+        <button class="sm" id="unsettleBtn">정산 취소</button></span>` : ''}
+    </div>`;
+
+  let body;
+  if (!fuel) {
+    const byCat = {};
+    genRows.forEach(r => byCat[r.category] = (byCat[r.category] || 0) + r.amount);
+    body = `
+    ${isAll ? '' : `
+    <form id="addForm" class="add-grid" novalidate>
+      <label>날짜<input type="date" name="spent_on" value="${defDate}"></label>
+      <label>구분<select name="category">${opts(CATEGORIES)}</select></label>
+      <label class="wide">사용처<input name="place" placeholder="택시 (고객 방문)"></label>
+      <label>금액(원)<input type="number" name="amount" min="1" step="100" placeholder="12800"></label>
+      <label>증빙<select name="proof">${opts(PROOFS)}</select></label>
+      <label class="wide">비고<input name="note" placeholder="동행자, 참고 사항 등"></label>
+      <button type="submit" class="primary">추가</button>
+    </form>
+    <p class="err-msg" id="addErr"></p>`}
+    ${selbar}
+    ${tableHTML(genRows, 'general', `${ymLabel(m)} 입력된 내역이 없어요.`)}
+    <div class="summary">
+      ${Object.entries(byCat).map(([k, v]) => `<span class="chip">${esc(k)} ${won(v)}</span>`).join('')}
+      ${fuelPending.length ? `<button class="chip wait" data-kind="fuel">주유비 영수증 대기 ${fuelPending.length}건 · ${won(sum(fuelPending))} (이 합계에 미포함)</button>` : ''}
+      <span class="total">${isAll ? '전체 합계' : '청구 합계'} ${won(sum(genRows))}</span>
+    </div>`;
+  } else {
+    body = `
+    ${isAll ? '' : `
+    <form id="addForm" class="add-grid fuel" novalidate>
+      <label>주유일<input type="date" name="spent_on" value="${t}"></label>
+      <label class="wide">주유소<input name="place" placeholder="GS칼텍스 OO점"></label>
+      <label>금액(원)<input type="number" name="amount" min="1" step="100" placeholder="70000"></label>
+      <label class="wide">비고 (차량·운행 목적)<input name="note" placeholder="12가3456 / 거래처 납품"></label>
+      <button type="submit" class="primary">추가</button>
+    </form>
+    <p class="err-msg" id="addErr"></p>`}
+    ${selbar}
+    <div class="sec-title">영수증 대기 <span class="badge wait">${fuelPending.length}건</span>
+      <small>영수증을 가져오면 관리자가 정산 처리해요. 달과 상관없이 전부 보여요.</small></div>
+    ${tableHTML(fuelPending, 'pending', '영수증을 기다리는 주유비가 없어요.')}
+    <div class="summary"><span class="total sm">대기 합계 ${won(sum(fuelPending))}</span></div>
+    <div class="sec-title">${ymLabel(m)} 정산 완료 <span class="badge ok">${fuelDone.length}건</span>
+      <small>정산일이 이 달인 주유비예요.</small></div>
+    ${tableHTML(fuelDone, 'done', `${ymLabel(m)}에 정산된 주유비가 없어요.`)}
+    <div class="summary"><span class="total">${ymLabel(m)} 주유비 정산 합계 ${won(sum(fuelDone))}</span></div>`;
+  }
+
+  $('#sheet').innerHTML = `
+  <section class="card">
+    <div class="sheet-head">
+      ${head}
+      <div><div class="lbl">정산 월</div><div class="big">${ymLabel(m)}</div></div>
+      <div class="actions">${printBtns}</div>
+    </div>
+    ${kindbar}
+    ${body}
+  </section>`;
+}
+
+function refreshSelection() {
+  document.querySelectorAll('#sheet tbody tr[data-id]').forEach(tr => {
+    const on = selected.has(Number(tr.dataset.id));
+    tr.classList.toggle('sel', on);
+    const c = tr.querySelector('.rowck'); if (c) c.checked = on;
+  });
+  document.querySelectorAll('#sheet .ckall').forEach(all => {
+    const list = groupRows(all.dataset.group);
+    const n = list.filter(r => selected.has(r.id)).length;
+    all.checked = list.length > 0 && n === list.length;
+    all.indeterminate = n > 0 && n < list.length;
+  });
+  $('#selCount').textContent = `${selected.size}건 선택`;
+}
+function groupRows(g) { return g === 'general' ? genRows : g === 'pending' ? fuelPending : fuelDone; }
+
+/* ---------- 엑셀 저장 ---------- */
+function exportExcel() {
+  const list = visibleRows().filter(r => selected.has(r.id));
+  if (!list.length) { toast('엑셀로 저장할 항목을 먼저 체크해 주세요'); return; }
+  if (typeof XLSX === 'undefined') { toast('엑셀 기능을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침하세요.'); return; }
+  const m = ym(), isAll = currentId === ALL, fuel = kind === 'fuel';
+  const who = isAll ? '전체 직원' : empName(currentId);
+  const total = sum(list);
+  const header = fuel
+    ? ['직원', '주유일', '주유소', '금액(원)', '상태', '정산일', '비고']
+    : ['직원', '날짜', '구분', '사용처', '금액(원)', '증빙', '비고'];
+  const amtCol = fuel ? 3 : 4;
+  const line = r => fuel
+    ? [empName(r.employee_id), r.spent_on, r.place, r.amount, r.settled_on ? '정산 완료' : '영수증 대기', r.settled_on || '', r.note || '']
+    : [empName(r.employee_id), r.spent_on, r.category, r.place, r.amount, r.proof || '', r.note || ''];
+  const totalRow = header.map((_, i) => i === 0 ? '합계' : i === amtCol ? total : '');
+  const aoa = [
+    [fuel ? '주유비 내역' : '개인경비 정산 내역'],
+    ['정산 월', ymLabel(m)],
+    ['신청자', who],
+    ['선택 건수', list.length + '건'],
+    [],
+    header,
+    ...list.map(line),
+    totalRow
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  for (let r = 6; r <= 6 + list.length; r++) {
+    const c = ws[XLSX.utils.encode_cell({ r, c: amtCol })];
+    if (c && c.t === 'n') c.z = '#,##0';
+  }
+  ws['!cols'] = fuel
+    ? [{ wch: 10 }, { wch: 12 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 28 }]
+    : [{ wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 28 }, { wch: 12 }, { wch: 10 }, { wch: 28 }];
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, fuel ? '주유비' : '정산내역');
+  const safe = who.replace(/[\\/:*?"<>|]/g, '').trim() || '직원';
+  XLSX.writeFile(wb, `${fuel ? '주유비' : '경비정산'}_${safe}_${m}.xlsx`);
+  toast(`${list.length}건을 엑셀로 저장했어요`);
+}
+
+/* ---------- 주유비 정산 처리 (관리자) ---------- */
+async function settle(on) {
+  const pool = on ? fuelPending : fuelDone;
+  const ids = pool.filter(r => selected.has(r.id)).map(r => r.id);
+  if (!ids.length) {
+    toast(on ? '정산할 "영수증 대기" 항목을 먼저 체크해 주세요' : '정산을 취소할 "정산 완료" 항목을 먼저 체크해 주세요');
+    return;
+  }
+  const date = $('#settleDate').value;
+  if (on && !date) { toast('정산일을 넣어 주세요'); return; }
+  if (!on && !confirm(`${ids.length}건을 다시 "영수증 대기"로 돌릴까요?`)) return;
+  const { error } = await sb.from('expenses').update({ settled_on: on ? date : null }).in('id', ids);
+  if (error) return fail(error, on ? '정산 처리' : '정산 취소');
+  toast(on ? (date.startsWith(ym()) ? `${ids.length}건을 정산 처리했어요`
+                                   : `${ids.length}건을 정산 처리했어요 (${ymLabel(date.slice(0, 7))} 정산으로 들어갔어요)`)
+           : `${ids.length}건을 영수증 대기로 돌렸어요`);
+  loadRows();
+}
+
+/* ---------- 출력 ---------- */
+function printPage(emp, list, m, fuelMode) {
+  const total = sum(list);
+  const cols = fuelMode
+    ? [['No', '5%'], ['주유일', '10%'], ['주유소', ''], ['금액', '14%'], ['정산일', '10%'], ['비고 (차량·운행 목적)', '28%']]
+    : [['No', '5%'], ['날짜', '9%'], ['구분', '11%'], ['사용처', ''], ['금액', '13%'], ['증빙', '11%'], ['비고', '20%']];
+  const amtIdx = fuelMode ? 3 : 4;
+  const cells = (r, i) => fuelMode
+    ? [i + 1, md(r.spent_on), esc(r.place), num(r.amount), md(r.settled_on), esc(r.note)]
+    : [i + 1, md(r.spent_on), esc(r.category), esc(r.place), num(r.amount), esc(r.proof), esc(r.note)];
+  const filled = list.map((r, i) => '<tr>' + cells(r, i).map((v, k) =>
+    `<td${k === 0 ? ' style="text-align:center"' : k === amtIdx ? ' class="num"' : ''}>${v}</td>`).join('') + '</tr>').join('');
+  const blanks = Array.from({ length: Math.max(0, 15 - list.length) }, () => '<tr>' + '<td></td>'.repeat(cols.length) + '</tr>').join('');
+  const byCat = {};
+  list.forEach(r => byCat[r.category] = (byCat[r.category] || 0) + r.amount);
+  const [y, mm] = m.split('-');
+  const lastDay = new Date(Number(y), Number(mm), 0).getDate();
+  return `
+  <div class="pp">
+    <div class="pp-top">
+      <h1>${fuelMode ? '주유비 정산서' : '개인경비 정산서'}</h1>
+      <table class="appr"><tr>${APPROVERS.map(a => `<th>${esc(a)}</th>`).join('')}</tr><tr>${APPROVERS.map(() => '<td></td>').join('')}</tr></table>
+    </div>
+    <table class="pinfo">
+      <tr><th>정산 월</th><td>${ymLabel(m)}</td><th>신청자</th><td>${esc(emp.name)}</td></tr>
+      <tr><th>${fuelMode ? '주유비 합계' : '청구 합계'}</th><td colspan="3"><b>${won(total)}</b> (${list.length}건${fuelMode ? ', 영수증 확인 완료분' : ''})</td></tr>
+    </table>
+    <table class="plist">
+      <tr>${cols.map(([h, w]) => `<th${w ? ` style="width:${w}"` : ''}>${h}</th>`).join('')}</tr>
+      ${filled}${blanks}
+      <tr><th colspan="${amtIdx}">합계</th><td class="num"><b>${num(total)}</b></td><td colspan="${cols.length - amtIdx - 1}"></td></tr>
+    </table>
+    ${fuelMode ? '' : `<table class="psum"><tr><th style="width:15%">구분별 소계</th><td>${
+      Object.keys(byCat).length ? Object.entries(byCat).map(([k, v]) => `${esc(k)} ${won(v)}`).join(' · ') : '-'}</td></tr></table>`}
+    <div class="psign">
+      위와 같이 ${fuelMode ? '주유비를 정산합니다' : '경비를 청구합니다'}.<br>
+      ${y}년 ${Number(mm)}월 ${lastDay}일<br>
+      신청인 : ${esc(emp.name)} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(서명)
+    </div>
+  </div>`;
+}
+function doPrint(html) { $('#printArea').innerHTML = html; setTimeout(() => window.print(), 50); }
+function printOne() {
+  const emp = employees.find(e => e.id === currentId);
+  if (kind === 'fuel' && !fuelDone.length) { toast(`${ymLabel(ym())}에 정산 완료된 주유비가 없어요`); return; }
+  doPrint(printPage(emp, kind === 'fuel' ? fuelDone : genRows, ym(), kind === 'fuel'));
+}
+async function printAll() {
+  const m = ym(), [from, to] = monthRange(m), fuel = kind === 'fuel';
+  let q = sb.from('expenses').select('*').eq('kind', fuel ? 'fuel' : 'general');
+  q = fuel ? q.gte('settled_on', from).lt('settled_on', to).order('settled_on')
+           : q.gte('spent_on', from).lt('spent_on', to);
+  const { data, error } = await q.order('spent_on').order('id');
+  if (error) return fail(error, '전체 내역 불러오기');
+  let targets = employees;
+  if (fuel) {
+    targets = employees.filter(e => data.some(r => r.employee_id === e.id));
+    if (!targets.length) { toast(`${ymLabel(m)}에 정산 완료된 주유비가 없어요`); return; }
+  }
+  doPrint(targets.map(e => printPage(e, data.filter(r => r.employee_id === e.id), m, fuel)).join(''));
+}
+
+/* ---------- 직원 추가·수정 (관리자) ---------- */
+function openEmp(emp) {
+  empEditId = emp ? emp.id : null;
+  $('#empTitle').textContent = emp ? '직원 정보 수정' : '직원 추가';
+  $('#empName').value = emp?.name ?? '';
+  $('#empEmail').value = emp?.email ?? '';
+  $('#empErr').textContent = '';
+  $('#empBox').classList.remove('hidden'); $('#empName').focus();
+}
+$('#empCancel').addEventListener('click', () => $('#empBox').classList.add('hidden'));
+$('#empForm').addEventListener('input', () => $('#empErr').textContent = '');
+$('#empForm').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const name = $('#empName').value.trim(), email = $('#empEmail').value.trim().toLowerCase();
+  const err = !name ? '이름을 넣어 주세요' : !isEmail(email) ? '이메일을 정확히 넣어 주세요' : '';
+  $('#empErr').textContent = err;
+  if (err) return;
+  let res;
+  if (empEditId) {
+    res = await sb.from('employees').update({ name, email }).eq('id', empEditId).select().single();
+  } else {
+    const ord = employees.reduce((a, e) => Math.max(a, e.sort_order), 0) + 1;
+    res = await sb.from('employees').insert({ name, email, sort_order: ord }).select().single();
+  }
+  if (res.error) {
+    $('#empErr').textContent = res.error.code === '23505' ? '이미 다른 직원이 쓰는 이메일이에요' : '저장하지 못했어요: ' + res.error.message;
+    return;
+  }
+  $('#empBox').classList.add('hidden');
+  currentId = res.data.id; setStore('expense.tab', currentId);
+  toast(empEditId ? '직원 정보를 바꿨어요' : `${name} 시트를 만들었어요`);
+  loadEmployees();
+});
+
+/* ---------- 이벤트 ---------- */
+$('#tabs').addEventListener('click', ev => {
+  const b = ev.target.closest('button'); if (!b) return;
+  if (b.id === 'addEmp') return openEmp(null);
+  currentId = b.dataset.id === ALL ? ALL : Number(b.dataset.id);
+  setStore('expense.tab', currentId);
+  renderTabs(); loadRows();
+});
+
+$('#sheet').addEventListener('change', ev => {
+  const t = ev.target;
+  if (t.classList.contains('ckall')) {
+    groupRows(t.dataset.group).forEach(r => t.checked ? selected.add(r.id) : selected.delete(r.id));
+    return refreshSelection();
+  }
+  if (t.classList.contains('rowck')) {
+    const id = Number(t.closest('tr').dataset.id);
+    if (t.checked) selected.add(id); else selected.delete(id);
+    refreshSelection();
+  }
+});
+
+$('#sheet').addEventListener('click', async ev => {
+  const b = ev.target.closest('button'); if (!b) return;
+  if (b.dataset.kind) {
+    if (b.dataset.kind !== kind) { kind = b.dataset.kind; setStore('expense.kind', kind); selected.clear(); editingId = null; renderSheet(); }
+    return;
+  }
+  if (b.id === 'excelBtn') return exportExcel();
+  if (b.id === 'settleBtn') return settle(true);
+  if (b.id === 'unsettleBtn') return settle(false);
+  if (b.id === 'printOne') return printOne();
+  if (b.id === 'printAll') return printAll();
+  if (b.id === 'editEmpBtn') return openEmp(employees.find(e => e.id === currentId));
+  const tr = b.closest('tr'); if (!tr || !b.dataset.act) return;
+  const id = Number(tr.dataset.id);
+  if (b.dataset.act === 'edit') { editingId = id; return renderSheet(); }
+  if (b.dataset.act === 'cancel') { editingId = null; return renderSheet(); }
+  if (b.dataset.act === 'del') {
+    if (!confirm('이 내역을 삭제할까요? 되돌릴 수 없어요.')) return;
+    const { error } = await sb.from('expenses').delete().eq('id', id);
+    if (error) return fail(error, '삭제');
+    toast('삭제했어요'); return loadRows();
+  }
+  if (b.dataset.act === 'save') {
+    const upd = {
+      spent_on: $('#e-date').value, place: $('#e-place').value.trim(),
+      amount: Math.round(Number($('#e-amt').value)), note: $('#e-note').value.trim() || null
+    };
+    if ($('#e-cat')) upd.category = $('#e-cat').value;
+    if ($('#e-proof')) upd.proof = $('#e-proof').value;
+    if (!upd.spent_on || !upd.place || !(upd.amount > 0)) return toast('날짜, 사용처, 금액을 확인하세요');
+    const { error } = await sb.from('expenses').update(upd).eq('id', id);
+    if (error) return fail(error, '수정');
+    toast('수정했어요'); return loadRows();
+  }
+});
+
+$('#sheet').addEventListener('submit', async ev => {
+  if (ev.target.id !== 'addForm') return;
+  ev.preventDefault();
+  const f = new FormData(ev.target), fuel = kind === 'fuel';
+  const rec = {
+    employee_id: currentId,
+    kind,
+    spent_on: f.get('spent_on'),
+    category: fuel ? '주유비' : f.get('category'),
+    place: String(f.get('place') || '').trim(),
+    amount: Math.round(Number(f.get('amount'))),
+    proof: fuel ? null : f.get('proof'),
+    note: String(f.get('note') || '').trim() || null
+  };
+  const err = !rec.spent_on ? '날짜를 넣어 주세요' : !rec.place ? (fuel ? '주유소를 넣어 주세요' : '사용처를 넣어 주세요')
+            : !(rec.amount > 0) ? '금액을 1원 이상으로 넣어 주세요' : '';
+  $('#addErr').textContent = err;
+  if (err) return;
+  const btn = ev.target.querySelector('button[type=submit]'); btn.disabled = true;
+  const { error } = await sb.from('expenses').insert(rec);
+  btn.disabled = false;
+  if (error) return fail(error, '저장');
+  toast(fuel ? '주유비를 "영수증 대기"로 저장했어요'
+       : rec.spent_on.startsWith(ym()) ? '저장했어요' : `${ymLabel(rec.spent_on.slice(0, 7))} 시트에 저장됐어요`);
+  loadRows();
+});
+$('#sheet').addEventListener('input', ev => { if (ev.target.closest('#addForm')) $('#addErr').textContent = ''; });
+
+$('#month').addEventListener('change', loadRows);
+
+/* ---------- 시작 ---------- */
+(function init() {
+  $('#month').value = ymNow();
+  if (!configured) {
+    showNotice($('#loginNotice'), '아직 Supabase 주소와 키가 입력되지 않았어요. index.html 위쪽 두 줄을 먼저 채워 주세요. (설치가이드 3단계)', 'err');
+    $('#lgBtn').disabled = true;
+    return;
+  }
+  const d = new Date(), last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  if (last - d.getDate() <= 2) showNotice($('#notice'), `이번 달 정산 마감(${d.getMonth()+1}월 ${last}일)이 다가왔어요. 내역을 확인하고 출력해 제출하세요.`, 'warn');
+  sb.auth.onAuthStateChange((_e, session) => { setTimeout(() => onSession(session), 0); });
+})();
+</script>
+</body>
+</html>
