@@ -38,6 +38,11 @@ label.inline input{width:auto}
 .tab.add{background:transparent;border-style:dashed;color:var(--accent)}
 .tab .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#c9c7bf;margin-left:6px;vertical-align:1px}
 .tab .dot.on{background:var(--ok)}
+.tab.retired{color:var(--sub);font-style:italic}
+.tab.toggle{background:transparent;border-style:dashed;color:var(--sub)}
+.retired-note{background:#f1f0eb;color:var(--sub);border-radius:8px;padding:10px 14px;font-size:14px;margin-bottom:12px}
+.modal .warn-box{background:var(--danger-bg);color:var(--danger);border-radius:8px;padding:10px 12px;font-size:14px;margin:0}
+button.danger-fill{background:var(--danger);border-color:var(--danger);color:#fff}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
 .tabs:not(.hidden) + main .card{border-top:none;border-radius:0 0 12px 12px}
 .sheet-head{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-end;margin-bottom:14px}
@@ -168,6 +173,21 @@ table.list{width:100%;border-collapse:collapse;font-size:14px;min-width:760px}
   </form>
 </div>
 
+<!-- 직원 완전 삭제 확인 창 (관리자) -->
+<div id="delBox" class="modal hidden">
+  <form class="box" id="delForm" novalidate>
+    <h2>직원 완전 삭제</h2>
+    <p class="warn-box" id="delWarn"></p>
+    <p class="hint">기록을 남기려면 삭제 대신 <b>퇴사 처리</b>를 쓰세요. 퇴사 처리는 되돌릴 수 있어요.</p>
+    <label id="delLabel">확인을 위해 직원 이름을 입력하세요<input id="delName" autocomplete="off"></label>
+    <p class="err-msg" id="delErr"></p>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button type="button" id="delCancel">닫기</button>
+      <button type="submit" class="danger-fill" id="delOk">완전 삭제</button>
+    </div>
+  </form>
+</div>
+
 <div id="printArea"></div>
 
 <script>
@@ -189,6 +209,7 @@ const sb = configured ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null
 const ALL = 'all';
 
 let me = null, isAdmin = false, employees = [], joined = {}, currentId = null;
+let showRetired = getStore('expense.showRetired') === '1', delTarget = null;
 let kind = getStore('expense.kind') === 'fuel' ? 'fuel' : 'general';
 let genRows = [], fuelPending = [], fuelDone = [];
 let selected = new Set(), editingId = null, signupMode = false, empEditId = null;
@@ -220,6 +241,9 @@ function showNotice(el, msg, type) { el.className = 'notice ' + type; el.textCon
 function fail(error, what) { console.error(error); toast(`${what} 실패: ${error.message || '알 수 없는 오류'}`); }
 const ym = () => $('#month').value || ymNow();
 const empName = id => employees.find(e => e.id === id)?.name ?? '';
+const empLabel = id => { const e = employees.find(x => x.id === id); return e ? e.name + (e.retired_on ? ' (퇴사)' : '') : ''; };
+const activeEmps = () => employees.filter(e => !e.retired_on);
+const retiredEmps = () => employees.filter(e => e.retired_on);
 const visibleRows = () => kind === 'general' ? genRows : [...fuelPending, ...fuelDone];
 
 /* ---------- 로그인 ---------- */
@@ -304,6 +328,7 @@ async function loadEmployees() {
     if (currentId !== ALL && !employees.some(e => e.id === currentId)) {
       currentId = savedId === ALL || employees.some(e => e.id === savedId) ? savedId : ALL;
     }
+    if (employees.find(e => e.id === currentId)?.retired_on) showRetired = true;
   } else {
     currentId = employees.find(e => (e.email || '').toLowerCase() === me)?.id ?? null;
   }
@@ -344,9 +369,13 @@ async function loadRows() {
 function renderTabs() {
   if (!isAdmin) { $('#tabs').innerHTML = ''; return; }
   const all = `<button class="tab ${currentId === ALL ? 'on' : ''}" data-id="${ALL}">전체 보기</button>`;
-  const tabs = employees.map(e =>
+  const tabs = activeEmps().map(e =>
     `<button class="tab ${e.id === currentId ? 'on' : ''}" data-id="${e.id}">${esc(e.name)}<span class="dot ${joined[e.id] ? 'on' : ''}" title="${joined[e.id] ? '가입 완료' : '아직 미가입'}"></span></button>`).join('');
-  $('#tabs').innerHTML = all + tabs + `<button class="tab add" id="addEmp">+ 직원 추가</button>`;
+  const ret = retiredEmps();
+  const retTabs = showRetired ? ret.map(e =>
+    `<button class="tab retired ${e.id === currentId ? 'on' : ''}" data-id="${e.id}">${esc(e.name)} (퇴사)</button>`).join('') : '';
+  const toggle = ret.length ? `<button class="tab toggle" id="toggleRetired">${showRetired ? '퇴사자 숨기기' : `퇴사자 ${ret.length}명 보기`}</button>` : '';
+  $('#tabs').innerHTML = all + tabs + `<button class="tab add" id="addEmp">+ 직원 추가</button>` + toggle + retTabs;
 }
 
 function opts(list, sel) {
@@ -365,7 +394,7 @@ function tableHTML(list, mode, emptyMsg) {
     : `<th style="width:72px">날짜</th><th style="width:84px">구분</th><th>사용처</th>
        <th class="num" style="width:100px">금액</th><th style="width:84px">증빙</th><th>비고</th>`;
   const rowHTML = r => {
-    const who = isAll ? `<td>${esc(empName(r.employee_id))}</td>` : '';
+    const who = isAll ? `<td>${esc(empLabel(r.employee_id))}</td>` : '';
     if (r.id === editingId) {
       return `<tr data-id="${r.id}"><td class="ck"></td>${who}
         <td><input type="date" id="e-date" value="${r.spent_on}"></td>
@@ -403,19 +432,29 @@ function renderSheet() {
   if (!isAll && !emp) {
     $('#sheet').innerHTML = `<section class="card"><p class="empty">${isAdmin
       ? '직원이 없어요. 위의 "+ 직원 추가"로 직원을 등록하세요.'
-      : '이 이메일(' + esc(me) + ')로 등록된 직원 시트가 없어요. 관리자에게 문의하세요.'}</p></section>`;
+      : '이 이메일(' + esc(me) + ')로 쓸 수 있는 직원 시트가 없어요. 등록되지 않았거나 퇴사 처리된 계정이에요. 관리자에게 문의하세요.'}</p></section>`;
     return;
   }
   const t = today();
   const defDate = t.startsWith(m) ? t : m + '-01';
   const fuel = kind === 'fuel';
+  const retired = !!emp?.retired_on;
+  const canAdd = !isAll && !retired;
 
+  const adminBtns = !isAdmin || isAll ? '' : retired
+    ? `<span class="badge no">${emp.retired_on} 퇴사</span>
+       <button class="sm" id="restoreBtn">재직으로 되돌리기</button>
+       <button class="sm danger" id="deleteEmpBtn">완전 삭제</button>`
+    : `<span class="badge ${joined[emp.id] ? 'ok' : 'no'}">${joined[emp.id] ? '가입 완료' : '미가입'}</span>
+       <button class="sm" id="editEmpBtn">직원 정보 수정</button>
+       <button class="sm" id="retireBtn">퇴사 처리</button>
+       <button class="sm danger" id="deleteEmpBtn">삭제</button>`;
   const head = isAll
-    ? `<div><div class="lbl">보기</div><div class="big">전체 직원 <span class="badge no">${employees.length}명</span></div></div>`
-    : `<div><div class="lbl">신청자</div><div class="big">${esc(emp.name)}
-        ${isAdmin ? `<span class="badge ${joined[emp.id] ? 'ok' : 'no'}">${joined[emp.id] ? '가입 완료' : '미가입'}</span>
-        <button class="sm" id="editEmpBtn">직원 정보 수정</button>` : ''}</div>
+    ? `<div><div class="lbl">보기</div><div class="big">전체 직원 <span class="badge no">재직 ${activeEmps().length}명</span></div></div>`
+    : `<div><div class="lbl">신청자</div><div class="big">${esc(emp.name)} ${adminBtns}</div>
         ${isAdmin ? `<div class="lbl">${esc(emp.email || '이메일 없음 — 직원 정보 수정에서 넣어 주세요')}</div>` : ''}</div>`;
+  const retiredNote = retired
+    ? `<div class="retired-note">퇴사한 직원이에요. 지난 기록은 보고, 출력하고, 엑셀로 저장할 수 있지만 새 내역은 넣을 수 없어요. 이 직원은 로그인해도 시트가 보이지 않아요.</div>` : '';
 
   const printBtns = fuel
     ? (isAll ? '<button id="printAll" class="primary">주유비 정산서 전체 출력</button>'
@@ -442,7 +481,7 @@ function renderSheet() {
     const byCat = {};
     genRows.forEach(r => byCat[r.category] = (byCat[r.category] || 0) + r.amount);
     body = `
-    ${isAll ? '' : `
+    ${!canAdd ? '' : `
     <form id="addForm" class="add-grid" novalidate>
       <label>날짜<input type="date" name="spent_on" value="${defDate}"></label>
       <label>구분<select name="category">${opts(CATEGORIES)}</select></label>
@@ -462,7 +501,7 @@ function renderSheet() {
     </div>`;
   } else {
     body = `
-    ${isAll ? '' : `
+    ${!canAdd ? '' : `
     <form id="addForm" class="add-grid fuel" novalidate>
       <label>주유일<input type="date" name="spent_on" value="${t}"></label>
       <label class="wide">주유소<input name="place" placeholder="GS칼텍스 OO점"></label>
@@ -489,6 +528,7 @@ function renderSheet() {
       <div><div class="lbl">정산 월</div><div class="big">${ymLabel(m)}</div></div>
       <div class="actions">${printBtns}</div>
     </div>
+    ${retiredNote}
     ${kindbar}
     ${body}
   </section>`;
@@ -523,8 +563,8 @@ function exportExcel() {
     : ['직원', '날짜', '구분', '사용처', '금액(원)', '증빙', '비고'];
   const amtCol = fuel ? 3 : 4;
   const line = r => fuel
-    ? [empName(r.employee_id), r.spent_on, r.place, r.amount, r.settled_on ? '정산 완료' : '영수증 대기', r.settled_on || '', r.note || '']
-    : [empName(r.employee_id), r.spent_on, r.category, r.place, r.amount, r.proof || '', r.note || ''];
+    ? [empLabel(r.employee_id), r.spent_on, r.place, r.amount, r.settled_on ? '정산 완료' : '영수증 대기', r.settled_on || '', r.note || '']
+    : [empLabel(r.employee_id), r.spent_on, r.category, r.place, r.amount, r.proof || '', r.note || ''];
   const totalRow = header.map((_, i) => i === 0 ? '합계' : i === amtCol ? total : '');
   const aoa = [
     [fuel ? '주유비 내역' : '개인경비 정산 내역'],
@@ -625,9 +665,11 @@ async function printAll() {
            : q.gte('spent_on', from).lt('spent_on', to);
   const { data, error } = await q.order('spent_on').order('id');
   if (error) return fail(error, '전체 내역 불러오기');
-  let targets = employees;
+  // 재직자는 내역이 없어도 한 장씩, 퇴사자는 그 달에 내역이 있을 때만 출력
+  const hasRows = e => data.some(r => r.employee_id === e.id);
+  let targets = employees.filter(e => !e.retired_on || hasRows(e));
   if (fuel) {
-    targets = employees.filter(e => data.some(r => r.employee_id === e.id));
+    targets = employees.filter(hasRows);
     if (!targets.length) { toast(`${ymLabel(m)}에 정산 완료된 주유비가 없어요`); return; }
   }
   doPrint(targets.map(e => printPage(e, data.filter(r => r.employee_id === e.id), m, fuel)).join(''));
@@ -658,7 +700,7 @@ $('#empForm').addEventListener('submit', async ev => {
     res = await sb.from('employees').insert({ name, email, sort_order: ord }).select().single();
   }
   if (res.error) {
-    $('#empErr').textContent = res.error.code === '23505' ? '이미 다른 직원이 쓰는 이메일이에요' : '저장하지 못했어요: ' + res.error.message;
+    $('#empErr').textContent = res.error.code === '23505' ? '이미 다른 직원(퇴사자 포함)이 쓰는 이메일이에요' : '저장하지 못했어요: ' + res.error.message;
     return;
   }
   $('#empBox').classList.add('hidden');
@@ -667,10 +709,52 @@ $('#empForm').addEventListener('submit', async ev => {
   loadEmployees();
 });
 
+/* ---------- 퇴사 처리·되돌리기·완전 삭제 (관리자) ---------- */
+async function setRetired(on) {
+  const emp = employees.find(e => e.id === currentId); if (!emp) return;
+  if (on && !confirm(`${emp.name} 님을 퇴사 처리할까요?\n지난 기록은 남고, 이 직원은 더 이상 로그인해서 볼 수 없어요. 나중에 되돌릴 수 있어요.`)) return;
+  const { error } = await sb.from('employees').update({ retired_on: on ? today() : null }).eq('id', emp.id);
+  if (error) return fail(error, on ? '퇴사 처리' : '되돌리기');
+  if (on) { showRetired = false; setStore('expense.showRetired', '0'); currentId = ALL; setStore('expense.tab', ALL); }
+  toast(on ? `${emp.name} 님을 퇴사 처리했어요. "퇴사자 보기"에서 기록을 볼 수 있어요.` : `${emp.name} 님을 재직으로 되돌렸어요`);
+  loadEmployees();
+}
+async function openDelete() {
+  const emp = employees.find(e => e.id === currentId); if (!emp) return;
+  delTarget = emp;
+  const { data, error } = await sb.from('expenses').select('id').eq('employee_id', emp.id);
+  if (error) return fail(error, '내역 확인');
+  $('#delWarn').textContent = `${emp.name} 님과 이 직원의 경비 내역 ${data.length}건(일반 경비·주유비 전부, 모든 달)이 지워지고 되돌릴 수 없어요.`;
+  $('#delLabel').firstChild.textContent = `확인을 위해 직원 이름 "${emp.name}"을(를) 입력하세요`;
+  $('#delName').value = ''; $('#delErr').textContent = '';
+  $('#delBox').classList.remove('hidden'); $('#delName').focus();
+}
+$('#delCancel').addEventListener('click', () => $('#delBox').classList.add('hidden'));
+$('#delForm').addEventListener('input', () => $('#delErr').textContent = '');
+$('#delForm').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  if (!delTarget) return;
+  if ($('#delName').value.trim() !== delTarget.name) { $('#delErr').textContent = '이름이 맞지 않아요. 정확히 입력해 주세요.'; return; }
+  const btn = $('#delOk'); btn.disabled = true;
+  const { error } = await sb.from('employees').delete().eq('id', delTarget.id);
+  btn.disabled = false;
+  if (error) { $('#delErr').textContent = '삭제하지 못했어요: ' + error.message; return; }
+  $('#delBox').classList.add('hidden');
+  toast(`${delTarget.name} 님과 경비 내역을 삭제했어요`);
+  delTarget = null; currentId = ALL; setStore('expense.tab', ALL);
+  loadEmployees();
+});
+
 /* ---------- 이벤트 ---------- */
 $('#tabs').addEventListener('click', ev => {
   const b = ev.target.closest('button'); if (!b) return;
   if (b.id === 'addEmp') return openEmp(null);
+  if (b.id === 'toggleRetired') {
+    showRetired = !showRetired; setStore('expense.showRetired', showRetired ? '1' : '0');
+    const cur = employees.find(e => e.id === currentId);
+    if (!showRetired && cur?.retired_on) { currentId = ALL; setStore('expense.tab', ALL); renderTabs(); return loadRows(); }
+    return renderTabs();
+  }
   currentId = b.dataset.id === ALL ? ALL : Number(b.dataset.id);
   setStore('expense.tab', currentId);
   renderTabs(); loadRows();
@@ -701,6 +785,9 @@ $('#sheet').addEventListener('click', async ev => {
   if (b.id === 'printOne') return printOne();
   if (b.id === 'printAll') return printAll();
   if (b.id === 'editEmpBtn') return openEmp(employees.find(e => e.id === currentId));
+  if (b.id === 'retireBtn') return setRetired(true);
+  if (b.id === 'restoreBtn') return setRetired(false);
+  if (b.id === 'deleteEmpBtn') return openDelete();
   const tr = b.closest('tr'); if (!tr || !b.dataset.act) return;
   const id = Number(tr.dataset.id);
   if (b.dataset.act === 'edit') { editingId = id; return renderSheet(); }
